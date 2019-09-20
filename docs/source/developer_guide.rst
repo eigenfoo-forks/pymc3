@@ -6,63 +6,67 @@ PyMC3 Developer Guide
 statistical modeling built on top of
 `Theano <http://deeplearning.net/software/theano/>`__. This
 document aims to explain the design and implementation of probabilistic
-programming in PyMC3, with comparisons to other PPL like TensorFlow Probability (TFP)
+programming in PyMC3, with comparisons to other probabilistic programming languages (PPLs) like TensorFlow Probability (TFP)
 and Pyro in mind. A user-facing API
 introduction can be found in the `API
 quickstart <https://docs.pymc.io/notebooks/api_quickstart.html>`__. A more accessible, user facing deep introduction can be found in
-`Peadar Coyle's probabilistic programming primer <https://github.com/springcoil/probabilisticprogrammingprimer>`__
+`Peadar Coyle's probabilistic programming primer <https://github.com/springcoil/probabilisticprogrammingprimer>`__.
 
-Distribution
-------------
+Distributions
+-------------
 
-A high-level introduction of ``Distribution`` in PyMC3 can be found in
+A high-level introduction of distributions in PyMC3 can be found in
 the `documentation <https://docs.pymc.io/Probability_Distributions.html>`__. The source
 code of the probability distributions is nested under
 `pymc3/distributions <https://github.com/pymc-devs/pymc3/blob/master/pymc3/distributions/>`__,
 with the ``Distribution`` class defined in `distribution.py
-<https://github.com/pymc-devs/pymc3/blob/master/pymc3/distributions/distribution.py#L23-L44>`__.
-A few important points to highlight in the Distribution Class:
+<https://github.com/pymc-devs/pymc3/blob/master/pymc3/distributions/distribution.py>`__.
+A few important points to highlight in the ``Distribution`` class:
 
 .. code:: python
 
     class Distribution:
         """Statistical distribution"""
         def __new__(cls, name, *args, **kwargs):
-            ...
+            # ...
+
             try:
                 model = Model.get_context()
             except TypeError:
-                raise TypeError(...
+                # Model context not found.
+                raise TypeError(...)
 
             if isinstance(name, string_types):
-                ...
+                # ...
                 dist = cls.dist(*args, **kwargs)
                 return model.Var(name, dist, ...)
-            ...
 
-In a way, the snippet above represents the unique features of pymc3's
+            # ...
+
+In a way, the snippet above represents the unique features of PyMC3's
 ``Distribution`` class:
 
-- Distribution objects are only usable inside of a ``Model`` context. If they are created outside of the model context manager, it raises an error.
+- ``Distribution`` objects are only usable inside of a ``Model`` context. If they are created outside of the model context manager, it raises an error.
 
-- A ``Distribution`` requires at least a name argument, and other parameters that defines the Distribution.
+- A ``Distribution`` requires at least a name argument, and other parameters that define the ``Distribution`` (e.g. ``mu`` and ``sd`` parameters for the ``Normal`` distribution).
 
-- When a ``Distribution`` is initialized inside of a Model context, two things happen:
+- When a ``Distribution`` is initialized inside of a ``Model`` context, two things happen:
 
-  1. a stateless distribution is initialized ``dist = {DISTRIBUTION_cls}.dist(*args, **kwargs)``;
-  2. a random variable following the said distribution is added to the model ``model.Var(name, dist, ...)``
+  1. A stateless distribution is initialized: ``dist = cls.dist(*args, **kwargs)``;
+  2. A random variable following the said distribution is added to the model: ``return model.Var(name, dist, ...)``
 
-Thus, users who are building models using ``with pm.Model() ...`` should
+Thus, users who are building models using ``with pm.Model()`` should
 be aware that they are never directly exposed to static and stateless
 distributions, but rather random variables that follow some density
-functions. Instead, to access a stateless distribution, you need to call
+function. Instead, to access a stateless distribution, you need to call
 ``pm.SomeDistribution.dist(...)`` or ``RV.dist`` *after* you initialized
-``RV`` in a model context (see
-https://docs.pymc.io/Probability\_Distributions.html#using-pymc-distributions-without-a-model).
+``RV`` in a model context (see `this doc page
+<https://docs.pymc.io/Probability_Distributions.html#using-pymc-distributions-without-a-model>`__
+for more information).
 
 With this distinction in mind, we can take a closer look at the
-stateless distribution part of pymc3 (see distribution api in `doc
-<https://docs.pymc.io/api/distributions.html>`__), which divided into:
+stateless distribution part of PyMC3 (see distribution API in `the documentation
+<https://docs.pymc.io/api/distributions.html>`__), which comprises:
 
 - Continuous
 
@@ -83,14 +87,14 @@ Quote from the doc:
 
     class SomeDistribution(Continuous):
         def __init__(...):
-            ...
+            # ...
 
         def random(self, point=None, size=None):
-            ...
+            # ...
             return random_samples
 
         def logp(self, value):
-            ...
+            # ...
             return total_log_prob
 
 PyMC3 expects the ``logp()`` method to return a log-probability
@@ -105,27 +109,26 @@ elementary. As long as you have a well-behaved density function, we can
 use it in the model to build the model log-likelihood function. Random
 number generation is great to have, but sometimes there might not be
 efficient random number generator for some densities. Since a function
-is all you need, you can wrap almost any thenao function into a
+is all you need, you can wrap almost any Theano function into a
 distribution using ``pm.DensityDist``
 https://docs.pymc.io/Probability\_Distributions.html#custom-distributions
 
 Thus, distributions that are defined in the ``distributions`` submodule
-(e.g. look at ``pm.Normal`` in ``pymc3.distributions.continuous``), each
-describes a *family* of probabilistic distribution (no different from
-distribution in other PPL library). Once it is initialised within a
+(e.g. ``pm.Normal`` in ``pymc3.distributions.continuous``) each
+describe a *family* of probabilistic distribution. Once it is initialised within a
 model context, it contains properties that are related to the random
-variable (*e.g.* mean/expectation). Note that if the parameters are
+variable (e.g. mean/expectation). Note that if the parameters are
 constants, these properties could be the same as the distribution
 properties.
 
 Reflection
 ~~~~~~~~~~
 
-How tensor/value semantics for probability distributions is enabled in pymc3:
+How tensor/value semantics for probability distributions is enabled in PyMC3:
 
 In PyMC3, we treat ``x = Normal('x', 0, 1)`` as defining a random
 variable (intercepted and collected under a model context, more on that
-below), and x.dist() as the associated density/mass function
+below), and ``x.dist()`` as the associated density/mass function
 (distribution in the mathematical sense). It is not perfect, and now
 after a few years learning Bayesian statistics I also realized these
 subtleties (i.e., the distinction between *random variable* and
@@ -140,8 +143,8 @@ density function that takes input :math:`x`
 .. math::
     (``X:=f(x) = 1/sqrt(2*pi) * exp(-.5*x**2)``)
 
-Within a model context, RVs are essentially Theano tensors (more on that
-below). This is different than TFP and pyro, where you need to be more
+Within a model context, random variables are essentially Theano tensors (more on that
+below). This is different than TensorFlow Probability and Pyro, where you need to be more
 explicit about the conversion. For example:
 
 **PyMC3**
@@ -151,10 +154,10 @@ explicit about the conversion. For example:
     with pm.Model() as model:
         z = pm.Normal('z', mu=0., sigma=5.)             # ==> pymc3.model.FreeRV, or theano.tensor with logp
         x = pm.Normal('x', mu=z, sigma=1., observed=5.) # ==> pymc3.model.ObservedRV, also has logp properties
-    x.logp({'z': 2.5})                               # ==> -4.0439386
-    model.logp({'z': 2.5})                           # ==> -6.6973152
+    x.logp({'z': 2.5})                                  # ==> -4.0439386
+    model.logp({'z': 2.5})                              # ==> -6.6973152
 
-**TFP**
+**TensorFlow Probability**
 
 .. code:: python
 
@@ -166,7 +169,7 @@ explicit about the conversion. For example:
     sess.run(x, feed_dict={z: 2.5})                  # ==> -4.0439386
     sess.run(model_logp, feed_dict={z: 2.5})         # ==> -6.6973152
 
-**pyro**
+**Pyro**
 
 .. code:: python
 
@@ -183,24 +186,25 @@ explicit about the conversion. For example:
 Random method and logp method, very different behind the curtain
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-In short, the random method is scipy/numpy-based, and the logp method is
+In short, the ``random`` method is SciPy/NumPy-based, whereas the ``logp`` method is
 Theano-based. The ``logp`` method is straightforward - it is a Theano
 function within each distribution. It has the following signature:
 
 .. code:: python
 
     def logp(self, value):
-        # GET PARAMETERS
+        # Get parameters
         param1, param2, ... = self.params1, self.params2, ...
-        # EVALUATE LOG-LIKELIHOOD FUNCTION, all inputs are (or array that could be convert to) theano tensor
-        total_log_prob = f(param1, param2, ..., value)
+        # Evaluate log-likelihood, all inputs are Theano tensors, or can be
+        # coerced into one
+        total_log_prob = log_likelihood(param1, param2, ..., value)
         return total_log_prob
 
 In the ``logp`` method, parameters and values are either Theano tensors,
-or could be converted to tensors. It is rather convenient as the
+or can be converted to Theano tensors. It is rather convenient as the
 evaluation of logp is represented as a tensor (``RV.logpt``), and when
 we linked different ``logp`` together (e.g., summing all ``RVs.logpt``
-to get the model totall logp) the dependence is taken care of by Theano
+to get the model total logp) the dependence is taken care of by Theano
 when the graph is built and compiled. Again, since the compiled function
 depends on the nodes that already in the graph, whenever you want to generate
 a new function that takes new input tensors you either need to regenerate the graph
