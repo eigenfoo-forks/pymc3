@@ -48,7 +48,7 @@ In a way, the snippet above represents the unique features of PyMC3's
 
 - ``Distribution`` objects are only usable inside of a ``Model`` context. If they are created outside of the model context manager, it raises an error.
 
-- A ``Distribution`` requires at least a name argument, and other parameters that define the ``Distribution`` (e.g. ``mu`` and ``sd`` parameters for the ``Normal`` distribution).
+- A ``Distribution`` requires at least a name argument, and other parameters that define the ``Distribution`` (e.g. ``mu`` and ``sigma`` parameters for the ``Normal`` distribution).
 
 - When a ``Distribution`` is initialized inside of a ``Model`` context, two things happen:
 
@@ -231,17 +231,17 @@ Or for a ObservedRV. it evaluate the logp on the data:
         self.logp_nojac_unscaledt = distribution.logp_nojac(data)
 
 However, for the random method things are a bit less graceful. As the
-random generator is limited in Theano, all random generation is done in
-scipy/numpy land. In the random method, we have:
+random generator is limited in Theano, all random number generation is done in
+SciPy/NumPy. In the random method, we have:
 
 .. code:: python
 
     def random(self, point=None, size=None):
-        # GET PARAMETERS
+        # Get parameters
         param1, param2, ... = draw_values([self.param1, self.param2, ...],
                                           point=point,
                                           size=size)
-        # GENERATE SAMPLE
+        # Generate sample
         samples = generate_samples(SCIPY_OR_NUMPY_RANDOM_FUNCTION,
                                    param1, param2, ... # ==> parameters, type is numpy arrays
                                    dist_shape=self.shape,
@@ -266,37 +266,35 @@ Model context and Random Variable
 I like to think that the ``with pm.Model() ...`` is a key syntax feature
 and *the* signature of PyMC3 model language, and in general a great
 out-of-the-box thinking/usage of the context manager in Python (with
-`some
-critics <https://twitter.com/_szhang/status/890793373740617729>`__, of
-course).
+some critics, of course).
 
 Essentially `what a context manager
 does <https://www.python.org/dev/peps/pep-0343/>`__ is:
 
 .. code:: python
 
-    with EXPR as VAR:
-        USERCODE
+    with expr as var:
+        user_code()
 
 which roughly translates into this:
 
 .. code:: python
 
-    VAR = EXPR
-    VAR.__enter__()
+    var = expr
+    var.__enter__()
     try:
-        USERCODE
+        user_code()
     finally:
-        VAR.__exit__()
+        var.__exit__()
 
 or conceptually:
 
 .. code:: python
 
-    with EXPR as VAR:
-        # DO SOMETHING
-        USERCODE
-        # DO SOME ADDITIONAL THINGS
+    with expr as var:
+        # Do something
+        user_code()
+        # Do some additional things
 
 So what happened within the ``with pm.Model() as model: ...`` block,
 besides the initial set up ``model = pm.Model()``? Starting from the
@@ -305,15 +303,15 @@ most elementary:
 Random Variable
 ~~~~~~~~~~~~~~~
 
-From the above session, we know that when we call eg
-``pm.Normal('x', ...)`` within a Model context, it returns a random
+From the above session, we know that when we call e.g.
+``pm.Normal('x', ...)`` within a ``Model`` context, it returns a random
 variable. Thus, we have two equivalent ways of adding random variable to
 a model:
 
 
 .. code:: python
 
-    with pm.Model() as m:
+    with pm.Model() as model:
         x = pm.Normal('x', mu=0., sigma=1.)
 
 
@@ -322,7 +320,7 @@ Which is the same as doing:
 
 .. code:: python
 
-    m = pm.Model()
+    model = pm.Model()
     x = m.Var('x', pm.Normal.dist(mu=0., sigma=1.))
 
 
@@ -341,8 +339,9 @@ Both with the same output:
 
 Looking closer to the classmethod ``model.Var``, it is clear that what
 PyMC3 does is an **interception** of the Random Variable, depending on
-the ``*args``:
-https://github.com/pymc-devs/pymc3/blob/6d07591962a6c135640a3c31903eba66b34e71d8/pymc3/model.py#L786-L847
+the ``*args``: see `this commit
+<https://github.com/pymc-devs/pymc3/blob/6d07591962a6c135640a3c31903eba66b34e71d8/pymc3/model.py#L786-L847>`__
+for more information.
 
 .. code:: python
 
@@ -442,9 +441,9 @@ Factor:
 
 and ``Factor`` basically `enable and assign the
 logp <https://github.com/pymc-devs/pymc3/blob/6d07591962a6c135640a3c31903eba66b34e71d8/pymc3/model.py#L195-L276>`__
-(representated as a tensor also) property to a Theano tensor (thus
-making it a random variable). For a ``TransformedRV``, it transform the
-distribution into a ``TransformedDistribution``, and then model.Var is
+(representated as a tensor also) to a Theano tensor (thus
+making it a random variable). For a ``TransformedRV``, it transforms the
+distribution into a ``TransformedDistribution``, and then ``model.Var`` is
 called again to added the RV associated with the
 ``TransformedDistribution`` as a ``FreeRV``:
 
@@ -454,10 +453,10 @@ called again to added the RV associated with the
         self.transformed = model.Var(
                     transformed_name, transform.apply(distribution), total_size=total_size)
 
-note: after ``transform.apply(distribution)`` its ``.transform``
-porperty is set to ``None``, thus making sure that the above call will
+Note: after ``transform.apply(distribution)`` its ``.transform``
+property is set to ``None``, thus making sure that the above call will
 only add one ``FreeRV``. In another word, you *cannot* do chain
-transformation by nested applying multiple transforms to a Distribution
+transformation by nested applying multiple transforms to a ``Distribution``
 (however, you can use `Chain
 transformation <https://docs.pymc.io/notebooks/api_quickstart.html?highlight=chain%20transformation>`__).
 
@@ -920,8 +919,8 @@ We love NUTS, or to be more precise Dynamic HMC with complex stoping
 rules. This part is actually all done outside of Theano, for NUTS, it
 includes: the leapfrog, dual averaging, tunning of mass matrix and step
 size, the tree building, sampler related statistics like divergence and
-energy checking. We actually have a Theano version of HMC:
-https://github.com/pymc-devs/pymc3/blob/master/pymc3/step\_methods/hmc/trajectory.py
+energy checking. We actually have `a Theano version of HMC
+<https://github.com/pymc-devs/pymc3/blob/master/pymc3/step\_methods/hmc/trajectory.py>`__
 but it is never been used.
 
 Variational Inference (VI)
@@ -1056,8 +1055,8 @@ we get error (even worse, wrong answer with silent error):
 
     with pm.Model() as m:
         mu = pm.Normal('mu', 0., 1., shape=(5, 1))
-        sd = pm.HalfNormal('sd', 5., shape=(1, 10))
-        pm.Normal('x', mu=mu, sigma=sd, observed=np.random.randn(2, 5, 10))
+        sigma = pm.HalfNormal('sigma', 5., shape=(1, 10))
+        pm.Normal('x', mu=mu, sigma=sigma, observed=np.random.randn(2, 5, 10))
         trace = pm.sample_prior_predictive(100)
 
     trace['x'].shape # ==> should be (100, 2, 5, 10), but get (100, 5, 10)
@@ -1095,7 +1094,7 @@ but likely it is a huge effort of refactoring. I implemented quite a lot
 of patches for mixture distribution, but still they are not done very
 naturally.
 
-Random methods in numpy
+Random methods in NumPy
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 There is a lot of complex logic for sampling from random variables, and
